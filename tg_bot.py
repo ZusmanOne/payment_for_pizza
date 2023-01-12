@@ -7,7 +7,7 @@ import redis
 from api_moltin import (get_all_pizza,get_product,get_image, get_token, add_product_cart,
                         get_cart,get_cart_items, create_cart,)
 from time import time
-
+import requests
 
 def start(context, update):
     serialize_products = get_all_pizza(context.bot_data['valid_token'])
@@ -177,6 +177,33 @@ def handle_users_reply(update, context):
         print(err, 'error')
 
 
+def location(update, context):
+    message = None
+    if update.edited_message:
+        message = update.edited_message
+    else:
+        message = update.message
+    current_pos = (message.location.latitude, message.location.longitude)
+    update.message.reply_text(current_pos)
+
+
+def fetch_coordinates(update, context, api_yandex):
+    base_url = "https://geocode-maps.yandex.ru/1.x"
+    response = requests.get(base_url, params={
+        "geocode": update.message.text,
+        "apikey": api_yandex,
+        "format": "json",
+    })
+    response.raise_for_status()
+    found_places = response.json()['response']['GeoObjectCollection']['featureMember']
+    try:
+        most_relevant = found_places[0]
+        lon, lat = most_relevant['GeoObject']['Point']['pos'].split(" ")
+        update.message.reply_text((lat, lon))
+    except IndexError:
+        update.message.reply_text('Такого адреса не существует')
+
+
 if __name__ == '__main__':
     env = Env()
     env.read_env()
@@ -186,6 +213,7 @@ if __name__ == '__main__':
     database_password = env('REDIS_PASSWORD')
     database_host = env('REDIS_HOST')
     database_port = env('REDIS_PORT')
+    api_yandex= env('API_YANDEX')
     db = redis.StrictRedis(host=database_host,
                            port=database_port,
                            password=database_password,
@@ -199,6 +227,8 @@ if __name__ == '__main__':
     dispatcher.bot_data['valid_token'] = authorization_data['authorization']
     dispatcher.bot_data['lifetime_token'] = authorization_data['expires']
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
-    dispatcher.add_handler(MessageHandler(Filters.text, handle_users_reply))
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
+    dispatcher.add_handler(MessageHandler(Filters.text, lambda update, context, *args:fetch_coordinates(update,context,api_yandex)))
+    dispatcher.add_handler(MessageHandler(Filters.location, location))
+
     updater.start_polling()
