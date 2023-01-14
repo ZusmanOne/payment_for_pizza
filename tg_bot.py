@@ -5,9 +5,11 @@ from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters,
 
 import redis
 from api_moltin import (get_all_pizza,get_product,get_image, get_token, add_product_cart,
-                        get_cart,get_cart_items, create_cart,)
+                        get_cart,get_cart_items, get_all_entries,create_cart,)
 from time import time
 import requests
+from geopy.distance import distance
+
 
 def start(context, update):
     serialize_products = get_all_pizza(context.bot_data['valid_token'])
@@ -187,20 +189,48 @@ def location(update, context):
     update.message.reply_text(current_pos)
 
 
-def fetch_coordinates(update, context, api_yandex):
+def fetch_coordinates(apikey, address):
     base_url = "https://geocode-maps.yandex.ru/1.x"
     response = requests.get(base_url, params={
-        "geocode": update.message.text,
-        "apikey": api_yandex,
+        "geocode": address,
+        "apikey": apikey,
         "format": "json",
     })
     response.raise_for_status()
     found_places = response.json()['response']['GeoObjectCollection']['featureMember']
+
+    if not found_places:
+        raise IndexError('Такого адреса не существует')
+
+    most_relevant = found_places[0]
+    lat, lon = most_relevant['GeoObject']['Point']['pos'].split(" ")
+    return lon, lat
+
+
+def get_distance(update, context, api_yandex):
+    all_pizzerias = get_all_entries(context.bot_data['valid_token'])
+
     try:
-        most_relevant = found_places[0]
-        lon, lat = most_relevant['GeoObject']['Point']['pos'].split(" ")
-        update.message.reply_text((lat, lon))
-    except IndexError:
+        user_coord = fetch_coordinates(api_yandex, update.message.text)
+        total_distance = [(distance(user_coord, pizzeria_address),pizzeria)
+                          for pizzeria,pizzeria_address in all_pizzerias.items()]
+        min_distance, pizzeria_address = min(total_distance)
+        if min_distance <= 0.5:
+            update.message.reply_text(f'Может заберете пиццу из нашего ресторана? Он совсем недалеко {min_distance},'
+                                      f'вот адрес - {pizzeria_address}')
+        if 0.5 < min_distance <= 5:
+            update.message.reply_text(f'''Придется прокатится до вас на самокате?
+            Доставка стоит 100р.Доставляем или самовывоз?''')
+
+        elif  5 < min_distance <= 20:
+            update.message.reply_text(f'Доставка до вашего адреса  будет стоить 300р')
+
+        elif min_distance > 20:
+            update.message.reply_text(f'Простите, но так далеко пиццу не доставим.'
+                                      f'Ближайший ресторан аж в {min_distance} от вас')
+
+    except Exception as err:
+        print(err)
         update.message.reply_text('Такого адреса не существует')
 
 
@@ -228,7 +258,7 @@ if __name__ == '__main__':
     dispatcher.bot_data['lifetime_token'] = authorization_data['expires']
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
-    dispatcher.add_handler(MessageHandler(Filters.text, lambda update, context, *args:fetch_coordinates(update,context,api_yandex)))
+    dispatcher.add_handler(MessageHandler(Filters.text, lambda update, context, *args:get_distance(update,context,api_yandex)))
     dispatcher.add_handler(MessageHandler(Filters.location, location))
 
     updater.start_polling()

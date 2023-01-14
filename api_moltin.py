@@ -244,16 +244,25 @@ def get_cart_items(cart_id, token):
     return response.json()
 
 
+def get_all_entries(token):
+    headers = {'Authorization': token}
+    response = requests.get('https://api.moltin.com/v2/flows/pizzeria/entries', headers=headers)
+    response.raise_for_status()
+    addreses_coord = {address['address']:(address['latitude'],address['longitude']) for address in response.json()['data']}
+    return addreses_coord
+
+
 if __name__=='__main__':
     env = Env()
     env.read_env()
     client_id = env('CLIENT_ID')
     client_secret = env('CLIENT_SECRET')
-    #print(get_token(client_id,client_secret))
+   #print(get_token(client_id,client_secret))
     #create_product('73342e68a0a8cb70de24f1e210c291c12958f683')
     #create_flow('4ac38dfb6948d32fde637e3395ce226daf40c656')
     #create_field('2764ae4eea90ab635b8bb4c8df058fd07b28dd75', 'ede13058-7b1a-42df-a5d0-d498a5576cb3')
     #add_entries('2764ae4eea90ab635b8bb4c8df058fd07b28dd75')
     #get_image('7028838c-6d20-4a0d-9742-72e57760f694','2d6bed1988a3206a11df774681270f141ec94810')
-    add_product_cart('305151573','12dfc328-6d2b-4046-a521-c42399eb7a58','7cc585bc7afed5cfe8d188aecfe7ef94eb4c162a')
+    #add_product_cart('305151573','12dfc328-6d2b-4046-a521-c42399eb7a58','7cc585bc7afed5cfe8d188aecfe7ef94eb4c162a')
     #get_cart('305151573','7cc585bc7afed5cfe8d188aecfe7ef94eb4c162a')
+    get_all_entries('4aafe709b4a075a2f1c16b54022d01dfad08a730')
