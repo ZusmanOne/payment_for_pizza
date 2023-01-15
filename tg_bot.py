@@ -5,10 +5,11 @@ from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters,
 
 import redis
 from api_moltin import (get_all_pizza,get_product,get_image, get_token, add_product_cart,
-                        get_cart,get_cart_items, get_all_entries,create_cart,)
+                        get_cart,get_cart_items, get_all_entries,delete_cart_item, get_entries_id, add_customer_address)
 from time import time
 import requests
 from geopy.distance import distance
+from textwrap import dedent
 
 
 def start(context, update):
@@ -24,6 +25,7 @@ def start(context, update):
 
 
 def handle_menu(context, update):
+    print('MENU')
     query = update.callback_query
     if query.data == 'Корзина':
         chat_id = query.message.chat_id
@@ -101,13 +103,12 @@ def handle_description(context, update):
                                  reply_markup=reply_markup)
         return "HANDLE_MENU"
     else:
-        # product, quantity = query_data.split('*')
         get_cart(chat_id, context.bot_data['valid_token'])
-        print(query_data)
         product_id = query_data
-        #print(product_id)
         add_product_cart(chat_id, product_id, context.bot_data['valid_token'])
-        return "HANDLE_CART"
+        context.bot.send_message(text="Данная пицца добавлена в корзину.Что бы ее получить,напишите свой адрес",
+                                 chat_id=chat_id)
+        return 'HANDLE_DELIVERY_METHOD'
 
 
 def handle_cart(context, update):
@@ -119,7 +120,7 @@ def handle_cart(context, update):
                                  chat_id=chat_id)
         return 'WAITING_EMAIL'
     if query.data == 'back':
-        serialize_products = get_all_product(context.bot_data['valid_token'])
+        serialize_products = get_all_pizza(context.bot_data['valid_token'])
         keyboard = []
         for product in serialize_products['data']:
             keyboard.append(
@@ -141,42 +142,6 @@ def waiting_email(context, update):
     update.message.reply_text(f'Ваша почта {user_email}')
     create_customers(user_email, context.bot_data['valid_token'])
     return "START"
-
-
-def handle_users_reply(update, context):
-    db = context.bot_data['db']
-    if update.message:
-        user_reply = update.message.text
-        chat_id = update.message.chat_id
-    elif update.callback_query:
-        user_reply = update.callback_query.data
-        chat_id = update.callback_query.message.chat_id
-    else:
-        return
-    if user_reply == '/start':
-        user_state = 'START'
-    else:
-        user_state = db.get(chat_id).decode("utf-8")
-    states_functions = {
-        'START': start,
-        'HANDLE_MENU': handle_menu,
-        'HANDLE_DESCRIPTION': handle_description,
-        'HANDLE_CART': handle_cart,
-        'WAITING_EMAIL': waiting_email,
-    }
-
-    state_handler = states_functions[user_state]
-    try:
-        if context.bot_data['lifetime_token'] < time():
-            client_id = db.get('client_id')
-            client_secret = db.get('client_secret')
-            authorization_data = get_token(client_id, client_secret)
-            context.bot_data['valid_token'] = authorization_data['authorization']
-            context.bot_data['lifetime_token'] = authorization_data['expires']
-        next_state = state_handler(context, update)
-        db.set(chat_id, next_state)
-    except Exception as err:
-        print(err, 'error')
 
 
 def location(update, context):
@@ -207,31 +172,117 @@ def fetch_coordinates(apikey, address):
     return lon, lat
 
 
-def get_distance(update, context, api_yandex):
-    all_pizzerias = get_all_entries(context.bot_data['valid_token'])
+def get_pizzeria_distance(pizzeria):
+    return pizzeria['distance']
 
+
+def get_nearest_pizzeria(token,user_coord):
+    all_pizzeria = get_all_entries(token)
+    for pizzeria in all_pizzeria['data']:
+        distance_to_client = distance(user_coord,(pizzeria['latitude'], pizzeria['longitude'])).km
+        pizzeria['distance'] = distance_to_client
+    min_distance = min(all_pizzeria['data'], key=get_pizzeria_distance)
+    return min_distance
+
+
+def get_distance(update, context, api_yandex):
     try:
         user_coord = fetch_coordinates(api_yandex, update.message.text)
-        total_distance = [(distance(user_coord, pizzeria_address),pizzeria)
-                          for pizzeria,pizzeria_address in all_pizzerias.items()]
-        min_distance, pizzeria_address = min(total_distance)
-        if min_distance <= 0.5:
-            update.message.reply_text(f'Может заберете пиццу из нашего ресторана? Он совсем недалеко {min_distance},'
-                                      f'вот адрес - {pizzeria_address}')
-        if 0.5 < min_distance <= 5:
-            update.message.reply_text(f'''Придется прокатится до вас на самокате?
-            Доставка стоит 100р.Доставляем или самовывоз?''')
+        keyboard = [[InlineKeyboardButton("Самовывоз", callback_data='self_delivery')],
+                    [InlineKeyboardButton("Доставка", callback_data='delivery')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        nearest_pizzeria = get_nearest_pizzeria(context.bot_data['valid_token'],user_coord)
+        pizzeria_address = nearest_pizzeria['address']
+        total_distance = float('%.2f' % nearest_pizzeria['distance'])
+        if total_distance <= 0.5:
+            update.message.reply_text(f'Может заберете пиццу из нашего ресторана? Он совсем недалеко {total_distance},'
+                                      f'вот адрес - {pizzeria_address}', reply_markup=reply_markup)
+        if 0.5 < total_distance <= 5:
+            context.bot_data['user_coord']=user_coord
+            answer_text = f'''
+            Придется прокатится до вас на самокате?
+            Доставка стоит 100р.Доставляем или самовывоз?
+            '''
+            update.message.reply_text(text=dedent(answer_text), reply_markup=reply_markup)
 
-        elif  5 < min_distance <= 20:
-            update.message.reply_text(f'Доставка до вашего адреса  будет стоить 300р')
+        if  5 < total_distance <= 20:
+            context.bot_data['user_coord'] = user_coord
+            update.message.reply_text(f'Доставка до вашего адреса  будет стоить 300р', reply_markup=reply_markup)
 
-        elif min_distance > 20:
-            update.message.reply_text(f'Простите, но так далеко пиццу не доставим.'
-                                      f'Ближайший ресторан аж в {min_distance} от вас')
+        if total_distance > 20:
+            context.bot_data['user_coord'] = user_coord
+            answer_text = f"""
+            Простите, но так далеко пиццу не доставим.
+            Ближайший ресторан аж в {total_distance} км от вас"""
+            update.message.reply_text(text=dedent(answer_text), reply_markup=reply_markup)
+        return "HANDLE_DELIVERY_METHOD"
 
     except Exception as err:
         print(err)
         update.message.reply_text('Такого адреса не существует')
+
+
+def handle_delivery_method(context,update):
+    query = update.callback_query
+    pizzeria = get_nearest_pizzeria(context.bot_data['valid_token'], context.bot_data['user_coord'])
+    if query.data == 'self_delivery':
+        context.bot.send_message(chat_id=query.message.chat_id,
+                                 text=f"Будем ждать вас по адресу: {pizzeria['address']}")
+    if query.data == 'delivery':
+        delivery_man = pizzeria['deliveryman_id']
+        customer_cart = get_cart_items(query.message.chat_id,context.bot_data['valid_token'])
+        description_cart = [
+            f"""
+        Наименование-{product['name']}
+        Описание-{product['description']}
+        Цена: {product['meta']['display_price']['with_tax']['unit']['formatted']}
+        В корзине: {product['quantity']} шт на сумму:{product['meta']['display_price']['with_tax']['value']['formatted']}
+            """
+            for product in customer_cart['data']]
+        full_cart = get_cart(query.message.chat_id, context.bot_data['valid_token'])
+        description_cart.append(f"Общая сумма:{full_cart['data']['meta']['display_price']['with_tax']['formatted']} р.")
+        latitude_client,longitude_client = context.bot_data['user_coord']
+        context.bot.send_message(text="".join(description_cart), chat_id=delivery_man)
+        context.bot.send_location(chat_id=delivery_man, latitude=latitude_client, longitude=longitude_client)
+    return 'START'
+
+
+def handle_users_reply(update, context):
+    db = context.bot_data['db']
+    if update.message:
+        user_reply = update.message.text
+        chat_id = update.message.chat_id
+    elif update.callback_query:
+        user_reply = update.callback_query.data
+        chat_id = update.callback_query.message.chat_id
+    else:
+        return
+    if user_reply == '/start':
+        user_state = 'START'
+    else:
+        user_state = db.get(chat_id).decode("utf-8")
+    states_functions = {
+        'START': start,
+        'HANDLE_MENU': handle_menu,
+        'HANDLE_DESCRIPTION': handle_description,
+        'HANDLE_CART': handle_cart,
+        'WAITING_EMAIL': waiting_email,
+        'HANDLE_DELIVERY_METHOD': handle_delivery_method,
+    }
+
+    state_handler = states_functions[user_state]
+    try:
+        if context.bot_data['lifetime_token'] < time():
+            client_id = db.get('client_id')
+            client_secret = db.get('client_secret')
+            authorization_data = get_token(client_id, client_secret)
+            context.bot_data['valid_token'] = authorization_data['authorization']
+            context.bot_data['lifetime_token'] = authorization_data['expires']
+        next_state = state_handler(context, update)
+        print(next_state, type(next_state))
+        db.set(chat_id, next_state)
+    except Exception as err:
+        print(err, 'error')
 
 
 if __name__ == '__main__':
