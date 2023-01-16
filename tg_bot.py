@@ -1,7 +1,7 @@
 from environs import Env
 from telegram import (InlineKeyboardButton, InlineKeyboardMarkup, )
 from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters,
-                          CallbackQueryHandler)
+                          CallbackQueryHandler,PreCheckoutQueryHandler, ShippingQueryHandler)
 
 import redis
 from api_moltin import (get_all_pizza,get_product,get_image, get_token, add_product_cart,
@@ -10,7 +10,7 @@ from time import time
 import requests
 from geopy.distance import distance
 from textwrap import dedent
-
+from telegram import (LabeledPrice, ShippingOption)
 
 def start(context, update):
     serialize_products = get_all_pizza(context.bot_data['valid_token'])
@@ -228,16 +228,32 @@ def send_remind(context):
                                   '*сообщение что делать если пицца не пришла*')
 
 
+def product_payment(update, context, product_price):
+    chat_id = update.effective_chat.id
+    title = "Оплата заказа"
+    description = f"Оплата заказа #000000"
+    payload = "PizzaPayment"
+    provider_token = context.bot_data['payment_token']
+    start_parameter = "test-payment"
+    currency = "RUB"
+    price = product_price
+    prices = [LabeledPrice("Оплата пиццы", price * 100)]
+    context.bot.send_invoice(chat_id, title, description,
+                             payload, provider_token,
+                             start_parameter, currency, prices)
+
+
 def handle_delivery_method(context, update):
     query = update.callback_query
     pizzeria = get_nearest_pizzeria(context.bot_data['valid_token'], context.bot_data['user_coord'])
+    full_cart = get_cart(query.message.chat_id, context.bot_data['valid_token'])
+    cart_price = full_cart['data']['meta']['display_price']['with_tax']['amount']
     if query.data == 'self_delivery':
         context.bot.send_message(chat_id=query.message.chat_id,
                                  text=f"Будем ждать вас по адресу: {pizzeria['address']}")
     if query.data == 'delivery':
-
         delivery_man = pizzeria['deliveryman_id']
-        customer_cart = get_cart_items(query.message.chat_id,context.bot_data['valid_token'])
+        customer_cart = get_cart_items(query.message.chat_id, context.bot_data['valid_token'])
         description_cart = [
             f"""
         Наименование-{product['name']}
@@ -246,13 +262,36 @@ def handle_delivery_method(context, update):
         В корзине: {product['quantity']} шт на сумму:{product['meta']['display_price']['with_tax']['value']['formatted']}
             """
             for product in customer_cart['data']]
-        full_cart = get_cart(query.message.chat_id, context.bot_data['valid_token'])
-        description_cart.append(f"Общая сумма:{full_cart['data']['meta']['display_price']['with_tax']['formatted']} р.")
+        context.bot_data['customer_cart'] = full_cart
+        description_cart.append(f"Общая сумма:{cart_price} р.")
         latitude_client,longitude_client = context.bot_data['user_coord']
         context.bot.send_message(text="".join(description_cart), chat_id=delivery_man)
         context.bot.send_location(chat_id=delivery_man, latitude=latitude_client, longitude=longitude_client)
+
+    product_payment(update,context,cart_price)
     context.job_queue.run_once(send_remind, 3600, context=query.message.chat_id)
+
+
     return 'START'
+
+
+def precheckout_callback(update, context):
+    query = update.pre_checkout_query
+    if query.invoice_payload != "PizzaPayment":
+        context.bot.answer_pre_checkout_query(
+            pre_checkout_query_id=query.id,
+            ok=False,
+            error_message="Что-то пошло не так..."
+        )
+    else:
+        context.bot.answer_pre_checkout_query(
+            pre_checkout_query_id=query.id,
+            ok=True
+        )
+
+
+def finish(update, context):
+    update.message.reply_text("Будем рады видеть вас снова")
 
 
 def handle_users_reply(update, context):
@@ -300,6 +339,7 @@ if __name__ == '__main__':
     client_id = env('CLIENT_ID')
     client_secret = env('CLIENT_SECRET')
     database_password = env('REDIS_PASSWORD')
+    payment_token = env('PAYMENT_TOKEN')
     database_host = env('REDIS_HOST')
     database_port = env('REDIS_PORT')
     api_yandex= env('API_YANDEX')
@@ -312,11 +352,14 @@ if __name__ == '__main__':
     db.set('client_secret', client_secret)
     updater = Updater(token)
     dispatcher = updater.dispatcher
+    dispatcher.bot_data['payment_token'] = payment_token
     dispatcher.bot_data['db'] = db
     dispatcher.bot_data['valid_token'] = authorization_data['authorization']
     dispatcher.bot_data['lifetime_token'] = authorization_data['expires']
+    dispatcher.add_handler(PreCheckoutQueryHandler(precheckout_callback))
+    dispatcher.add_handler(MessageHandler(Filters.successful_payment, finish))
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
-    dispatcher.add_handler(CommandHandler('timer', callback_timer))
+    #dispatcher.add_handler(CommandHandler('timer', callback_timer))
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
     dispatcher.add_handler(MessageHandler(Filters.text,
                                           lambda update, context, *args:get_distance(update,
