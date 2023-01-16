@@ -220,16 +220,12 @@ def get_distance(update, context, api_yandex):
         print(err)
         update.message.reply_text('Такого адреса не существует')
 
-#
-# def send_free_pizza(bot, job):
-#     bot.send_message(chat_id=job.context,
-#                      text='Мы не успеваем доставить пиццу в установленное время.А '
-#                           'это значит что вы получаете пиццу бесплатно!')
 
-
-def callback_increasing(bot, job):
-    bot.send_message(chat_id=job.context,
-                     text='Sending messages with increasing delay up to 10s, then stops.')
+def send_remind(context):
+    job = context.job
+    context.bot.send_message(chat_id=job.context,
+                             text='Приятного аппетита! *место для рекламы*'
+                                  '*сообщение что делать если пицца не пришла*')
 
 
 def handle_delivery_method(context, update):
@@ -255,8 +251,7 @@ def handle_delivery_method(context, update):
         latitude_client,longitude_client = context.bot_data['user_coord']
         context.bot.send_message(text="".join(description_cart), chat_id=delivery_man)
         context.bot.send_location(chat_id=delivery_man, latitude=latitude_client, longitude=longitude_client)
-    #job_queue.run_once(callback_increasing, 3,context=query.message.chat_id)
-    #context.job_queue.run_once(callback_increasing, 3, context=query.message.chat_id)
+    context.job_queue.run_once(send_remind, 3600, context=query.message.chat_id)
     return 'START'
 
 
@@ -297,15 +292,6 @@ def handle_users_reply(update, context):
         print(err, 'error')
 
 
-""" тестовая ф-ия для проверки работы очереди"""
-def callback_alarm(bot, job):
-    bot.send_message(chat_id=job.context, text='BEEP')
-
-
-def callback_timer(bot, update, job_queue):
-    bot.send_message(chat_id=update.message.chat_id, text='Setting a timer for 1 minute!')
-    job_queue.run_once(callback_alarm, 2, context=update.message.chat_id)
-
 
 if __name__ == '__main__':
     env = Env()
@@ -322,16 +308,15 @@ if __name__ == '__main__':
                            password=database_password,
                            charset="utf-8")
     authorization_data = get_token(client_id, client_secret)
-    db.set('client_id',client_id)
+    db.set('client_id', client_id)
     db.set('client_secret', client_secret)
-    updater = Updater(token,use_context=True)  #без context работает очередь, но не работает все остальное и наоборот
-    #job_queue = updater.job_queue
+    updater = Updater(token)
     dispatcher = updater.dispatcher
     dispatcher.bot_data['db'] = db
     dispatcher.bot_data['valid_token'] = authorization_data['authorization']
     dispatcher.bot_data['lifetime_token'] = authorization_data['expires']
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
-    dispatcher.add_handler(CommandHandler('timer', callback_timer, pass_job_queue=True))
+    dispatcher.add_handler(CommandHandler('timer', callback_timer))
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
     dispatcher.add_handler(MessageHandler(Filters.text,
                                           lambda update, context, *args:get_distance(update,
