@@ -1,24 +1,22 @@
 from environs import Env
 from telegram import (InlineKeyboardButton, InlineKeyboardMarkup, )
 from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters,
-                          CallbackQueryHandler,PreCheckoutQueryHandler, ShippingQueryHandler)
-
+                          CallbackQueryHandler, PreCheckoutQueryHandler)
 import redis
-from api_moltin import (get_all_pizza,get_product,get_image, get_token, add_product_cart,
-                        get_cart,get_cart_items, get_all_entries,delete_cart_item, get_entries_id, add_customer_address)
+from api_moltin import (get_all_pizza, get_product, get_image, get_token, add_product_cart,
+                        get_cart, get_cart_items, get_all_entries, delete_cart_item)
 from time import time
 import requests
 from geopy.distance import distance
 from textwrap import dedent
-from telegram import (LabeledPrice, ShippingOption)
+from telegram import (LabeledPrice)
+
 
 def start(context, update):
     serialize_products = get_all_pizza(context.bot_data['valid_token'])
     keyboard = [[InlineKeyboardButton("Корзина", callback_data='Корзина')]]
     for product in serialize_products['data']:
-        keyboard.append(
-            [InlineKeyboardButton(product['name'], callback_data=product['id'])]
-        )
+        keyboard.append([InlineKeyboardButton(product['name'], callback_data=product['id'])])
     reply_markup = InlineKeyboardMarkup(keyboard)
     update.message.reply_text('Please choose:', reply_markup=reply_markup)
     return "HANDLE_MENU"
@@ -53,14 +51,16 @@ def handle_menu(context, update):
     reply_markup = InlineKeyboardMarkup(keyboard)
     serializer_product = get_product(query.data, context.bot_data['valid_token'])
     file_product_id = serializer_product['data']['relationships']['files']['data'][0]['id']
+    text = f"""
+            {serializer_product['data']['name']}
+            {serializer_product['data']['description']}
+            {serializer_product['data']['price'][0]['amount']}р. - за шт
+            """
     context.bot.send_photo(chat_id=query.message.chat_id, photo=get_image(file_product_id,context.bot_data['valid_token']),
-                           caption=f"""{serializer_product['data']['name']}
-                                       {serializer_product['data']['description']}
-                                       {serializer_product['data']['price'][0]['amount']}р. - за шт""",
+                           caption=dedent(text),
                            reply_markup=reply_markup)
     context.bot.delete_message(chat_id=query.message.chat_id,
                                message_id=update.callback_query.message.message_id)
-
     return 'HANDLE_DESCRIPTION'
 
 
@@ -82,7 +82,7 @@ def handle_description(context, update):
             Цена за 1кг: {product['meta']['display_price']['with_tax']['unit']['formatted']}
             В корзине: {product['quantity']} кг на сумму:
             {product['meta']['display_price']['with_tax']['value']['formatted']}\n\n"""
-                            for product in cart['data']]
+            for product in cart['data']]
         full_cart = get_cart(query.message.chat_id, context.bot_data['valid_token'])
         description_cart.append(f"Общая сумма:{full_cart['data']['meta']['display_price']['with_tax']['formatted']}")
         context.bot.send_message(text="".join(description_cart),
@@ -135,14 +135,6 @@ def handle_cart(context, update):
         return 'HANDLE_CART'
 
 
-def waiting_email(context, update):
-    chat_id = update.message.chat_id
-    user_email = update.message.text
-    update.message.reply_text(f'Ваша почта {user_email}')
-    create_customers(user_email, context.bot_data['valid_token'])
-    return "START"
-
-
 def location(update, context):
     message = None
     if update.edited_message:
@@ -162,10 +154,8 @@ def fetch_coordinates(apikey, address):
     })
     response.raise_for_status()
     found_places = response.json()['response']['GeoObjectCollection']['featureMember']
-
     if not found_places:
         raise IndexError('Такого адреса не существует')
-
     most_relevant = found_places[0]
     lat, lon = most_relevant['GeoObject']['Point']['pos'].split(" ")
     return lon, lat
@@ -175,10 +165,10 @@ def get_pizzeria_distance(pizzeria):
     return pizzeria['distance']
 
 
-def get_nearest_pizzeria(token,user_coord):
+def get_nearest_pizzeria(token, user_coord):
     all_pizzeria = get_all_entries(token)
     for pizzeria in all_pizzeria['data']:
-        distance_to_client = distance(user_coord,(pizzeria['latitude'], pizzeria['longitude'])).km
+        distance_to_client = distance(user_coord, (pizzeria['latitude'], pizzeria['longitude'])).km
         pizzeria['distance'] = distance_to_client
     min_distance = min(all_pizzeria['data'], key=get_pizzeria_distance)
     return min_distance
@@ -190,24 +180,22 @@ def get_distance(update, context, api_yandex):
         keyboard = [[InlineKeyboardButton("Самовывоз", callback_data='self_delivery')],
                     [InlineKeyboardButton("Доставка", callback_data='delivery')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        nearest_pizzeria = get_nearest_pizzeria(context.bot_data['valid_token'],user_coord)
+        nearest_pizzeria = get_nearest_pizzeria(context.bot_data['valid_token'], user_coord)
         pizzeria_address = nearest_pizzeria['address']
         total_distance = float('%.2f' % nearest_pizzeria['distance'])
         if total_distance <= 0.5:
             update.message.reply_text(f'Может заберете пиццу из нашего ресторана? Он совсем недалеко {total_distance},'
                                       f'вот адрес - {pizzeria_address}', reply_markup=reply_markup)
         if 0.5 < total_distance <= 5:
-            context.bot_data['user_coord']=user_coord
+            context.bot_data['user_coord'] = user_coord
             answer_text = f'''
             Придется прокатится до вас на самокате?
             Доставка стоит 100р.Доставляем или самовывоз?
             '''
             update.message.reply_text(text=dedent(answer_text), reply_markup=reply_markup)
-
-        if  5 < total_distance <= 20:
+        if 5 < total_distance <= 20:
             context.bot_data['user_coord'] = user_coord
-            update.message.reply_text(f'Доставка до вашего адреса  будет стоить 300р', reply_markup=reply_markup)
-
+            update.message.reply_text('Доставка до вашего адреса  будет стоить 300р', reply_markup=reply_markup)
         if total_distance > 20:
             context.bot_data['user_coord'] = user_coord
             answer_text = f"""
@@ -215,7 +203,6 @@ def get_distance(update, context, api_yandex):
             Ближайший ресторан аж в {total_distance} км от вас"""
             update.message.reply_text(text=dedent(answer_text), reply_markup=reply_markup)
         return "HANDLE_DELIVERY_METHOD"
-
     except Exception as err:
         print(err)
         update.message.reply_text('Такого адреса не существует')
@@ -231,7 +218,7 @@ def send_remind(context):
 def product_payment(update, context, product_price):
     chat_id = update.effective_chat.id
     title = "Оплата заказа"
-    description = f"Оплата заказа #000000"
+    description = "Оплата заказа #000000"
     payload = "PizzaPayment"
     provider_token = context.bot_data['payment_token']
     start_parameter = "test-payment"
@@ -264,18 +251,16 @@ def handle_delivery_method(context, update):
             for product in customer_cart['data']]
         context.bot_data['customer_cart'] = full_cart
         description_cart.append(f"Общая сумма:{cart_price} р.")
-        latitude_client,longitude_client = context.bot_data['user_coord']
+        latitude_client, longitude_client = context.bot_data['user_coord']
         context.bot.send_message(text="".join(description_cart), chat_id=delivery_man)
         context.bot.send_location(chat_id=delivery_man, latitude=latitude_client, longitude=longitude_client)
 
-    product_payment(update,context,cart_price)
+    product_payment(update, context, cart_price)
     context.job_queue.run_once(send_remind, 3600, context=query.message.chat_id)
-
-
     return 'START'
 
 
-def precheckout_callback(update, context):
+def pre_checkout_callback(update, context):
     query = update.pre_checkout_query
     if query.invoice_payload != "PizzaPayment":
         context.bot.answer_pre_checkout_query(
@@ -313,7 +298,6 @@ def handle_users_reply(update, context):
         'HANDLE_MENU': handle_menu,
         'HANDLE_DESCRIPTION': handle_description,
         'HANDLE_CART': handle_cart,
-        'WAITING_EMAIL': waiting_email,
         'HANDLE_DELIVERY_METHOD': handle_delivery_method,
     }
 
@@ -331,7 +315,6 @@ def handle_users_reply(update, context):
         print(err, 'error')
 
 
-
 if __name__ == '__main__':
     env = Env()
     env.read_env()
@@ -342,7 +325,7 @@ if __name__ == '__main__':
     payment_token = env('PAYMENT_TOKEN')
     database_host = env('REDIS_HOST')
     database_port = env('REDIS_PORT')
-    api_yandex= env('API_YANDEX')
+    api_yandex = env('API_YANDEX')
     db = redis.StrictRedis(host=database_host,
                            port=database_port,
                            password=database_password,
@@ -356,15 +339,11 @@ if __name__ == '__main__':
     dispatcher.bot_data['db'] = db
     dispatcher.bot_data['valid_token'] = authorization_data['authorization']
     dispatcher.bot_data['lifetime_token'] = authorization_data['expires']
-    dispatcher.add_handler(PreCheckoutQueryHandler(precheckout_callback))
+    dispatcher.add_handler(PreCheckoutQueryHandler(pre_checkout_callback))
     dispatcher.add_handler(MessageHandler(Filters.successful_payment, finish))
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
-    #dispatcher.add_handler(CommandHandler('timer', callback_timer))
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
     dispatcher.add_handler(MessageHandler(Filters.text,
-                                          lambda update, context, *args:get_distance(update,
-                                                                                     context,api_yandex),
-                                          ))
+                                          lambda update, context, *args: get_distance(update, context, api_yandex),))
     dispatcher.add_handler(MessageHandler(Filters.location, location))
-
     updater.start_polling()

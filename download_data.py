@@ -19,15 +19,7 @@ def download_menu():
         json.dump(content, file, indent=2, ensure_ascii=False)
 
 
-
-
-
 if __name__ == '__main__':
     download_menu()
     download_address()
-    with open('menu_pizza.json', 'r') as file:
-        data = file.read()
-        json_data = json.loads(data)
 
-    for i in json_data:
-        print(i['product_image']['url'])

@@ -26,7 +26,6 @@ def create_file_product(token, url):
     file = {
         'file_location': (None, f'{url}'),
     }
-
     file_response = requests.post('https://api.moltin.com/v2/files', headers=headers, files=file)
     file_response.raise_for_status()
     file_id = file_response.json()['data']['id']
@@ -34,7 +33,6 @@ def create_file_product(token, url):
 
 
 def bind_product_image(product_id, file_id, token):
-    #file_id = create_file_product(token)
     headers = {
         'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
@@ -52,7 +50,6 @@ def bind_product_image(product_id, file_id, token):
     bind_response.raise_for_status()
 
 
-
 def create_product(token):
     with open('menu_pizza.json', 'r') as file:
         data = file.read()
@@ -60,7 +57,6 @@ def create_product(token):
     headers = {
         'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
-
     }
     for pizza in pizza_data:
         file_id = create_file_product(token, pizza['product_image']['url'])
@@ -85,10 +81,8 @@ def create_product(token):
 
                 }
         }
-        print(pizza_data)
         response_product = requests.post(f'https://api.moltin.com/v2/products', headers=headers, json=pizza_data)
         response_product.raise_for_status()
-        print(response_product.json())
         product_id = response_product.json()['data']['id']
         bind_product_image(product_id, file_id, token)
 
@@ -109,8 +103,6 @@ def create_flow(token):
     }
     response = requests.post('https://api.moltin.com/v2/flows', headers=headers, json=flow_data)
     response.raise_for_status()
-    print(response.status_code)
-    print(response.json())
 
 
 def create_field(token, id_flow):
@@ -118,7 +110,7 @@ def create_field(token, id_flow):
         'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
     }
-    json_data = {
+    field_data = {
         'data': {
             'type': 'field',
             'name': 'deliveryman id',
@@ -140,10 +132,8 @@ def create_field(token, id_flow):
             },
         },
     }
-
-    response = requests.post('https://api.moltin.com/v2/fields', headers=headers, json=json_data)
+    response = requests.post('https://api.moltin.com/v2/fields', headers=headers, json=field_data)
     response.raise_for_status()
-    print(response.json())
 
 
 def add_entries(token):
@@ -154,9 +144,7 @@ def add_entries(token):
         'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
     }
-    print(headers)
     for data in pizza_data:
-        print(data['address']['full'])
         entries_data = {
             "data":
                 {
@@ -171,7 +159,6 @@ def add_entries(token):
         response = requests.post(f'https://api.moltin.com/v2/flows/pizzeria/entries', headers=headers,
                                  json=entries_data)
         response.raise_for_status()
-        print(response.json())
 
 
 def get_all_pizza(token):
@@ -185,7 +172,6 @@ def get_product(product_id, token):
     headers = {'Authorization': token}
     response = requests.get(f'https://api.moltin.com/v2/products/{product_id}', headers=headers)
     response.raise_for_status()
-    #print(response.json())
     return response.json()
 
 
@@ -193,7 +179,6 @@ def get_image(id_file, token):
     headers = {'Authorization': token}
     response = requests.get(f'https://api.moltin.com/v2/files/{id_file}', headers=headers)
     response.raise_for_status()
-    #print(response.json())
     url_image = response.json()['data']['link']['href']
     return url_image
 
@@ -224,8 +209,6 @@ def add_product_cart(cart_id, product_id, token):
     }
     add_cart_response = requests.post(f'https://api.moltin.com/v2/carts/{cart_id}/items', headers=headers,
                                       json=product_data)
-    #add_cart_response.raise_for_status()
-    #print(add_cart_response.json())
 
 
 def get_cart(cart_id, token):
@@ -254,21 +237,8 @@ def get_all_entries(token):
     headers = {'Authorization': token}
     response = requests.get('https://api.moltin.com/v2/flows/pizzeria/entries', headers=headers)
     response.raise_for_status()
-    #addreses_coord = {address['address']:(address['latitude'],address['longitude']) for address in response.json()['data']}
-    #delivery_ids = [pizzeria['id'] for pizzeria in response.json()['data']]
-    #print(addreses_coord)
     return response.json()
 
-
-def get_entries_id(token):
-    headers = {'Authorization': token}
-    response = requests.get('https://api.moltin.com/v2/flows/pizzeria/entries', headers=headers)
-    response.raise_for_status()
-    #addreses_coord = {address['address']:(address['latitude'],address['longitude']) for address in response.json()['data']}
-    #delivery_ids = {pizzeria['address']:pizzeria['id'] for pizzeria in response.json()['data']}
-    #print(delivery_ids)
-    print(response.json()['data'])
-    #return delivery_ids
 
 def update_entries(token):
     headers = {'Authorization': token}
@@ -285,16 +255,14 @@ def update_entries(token):
         response = requests.put(f'https://api.moltin.com/v2/flows/pizzeria/entries/{id}',
                                 headers=headers, json=data)
         response.raise_for_status()
-        print(response.json())
+
 
 def add_customer_address(token, customer_coord):
-    #print(customer_coord)
-    latitude,longitude, = customer_coord
+    latitude, longitude, = customer_coord
     headers = {
         'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
     }
-
     customer_data = {
         "data":
             {
@@ -303,11 +271,9 @@ def add_customer_address(token, customer_coord):
                 'longitude': float(longitude),
             }
     }
-
     response = requests.post(f'https://api.moltin.com/v2/flows/customer_address/entries', headers=headers,
                              json=customer_data)
     response.raise_for_status()
-    print(response.status_code)
     return response.status_code
 
 
@@ -316,15 +282,3 @@ if __name__=='__main__':
     env.read_env()
     client_id = env('CLIENT_ID')
     client_secret = env('CLIENT_SECRET')
-    #print(get_token(client_id,client_secret))
-    #create_product('73342e68a0a8cb70de24f1e210c291c12958f683')
-    #create_flow('c14b0c1523ef0e8b8c85246d0eb5faef413667ad')
-    #create_field('c14b0c1523ef0e8b8c85246d0eb5faef413667ad', 'ede13058-7b1a-42df-a5d0-d498a5576cb3')
-    #add_entries('2764ae4eea90ab635b8bb4c8df058fd07b28dd75')
-    #get_image('7028838c-6d20-4a0d-9742-72e57760f694','2d6bed1988a3206a11df774681270f141ec94810')
-    #add_product_cart('305151573','12dfc328-6d2b-4046-a521-c42399eb7a58','7cc585bc7afed5cfe8d188aecfe7ef94eb4c162a')
-    #get_cart('305151573','7cc585bc7afed5cfe8d188aecfe7ef94eb4c162a')
-    #get_all_entries('f13bb8e8331a4cc106faf7e4fa523a64e007a52c')
-    #add_customer_address('c14b0c1523ef0e8b8c85246d0eb5faef413667ad',)
-    #update_entries('f13bb8e8331a4cc106faf7e4fa523a64e007a52c')
-    get_entries_id('3993380e9a831364adac3bd465df0049f65ed37c')
