@@ -25,7 +25,6 @@ def start(context, update):
 
 
 def handle_menu(context, update):
-    print('MENU')
     query = update.callback_query
     if query.data == 'Корзина':
         chat_id = query.message.chat_id
@@ -221,14 +220,26 @@ def get_distance(update, context, api_yandex):
         print(err)
         update.message.reply_text('Такого адреса не существует')
 
+#
+# def send_free_pizza(bot, job):
+#     bot.send_message(chat_id=job.context,
+#                      text='Мы не успеваем доставить пиццу в установленное время.А '
+#                           'это значит что вы получаете пиццу бесплатно!')
 
-def handle_delivery_method(context,update):
+
+def callback_increasing(bot, job):
+    bot.send_message(chat_id=job.context,
+                     text='Sending messages with increasing delay up to 10s, then stops.')
+
+
+def handle_delivery_method(context, update):
     query = update.callback_query
     pizzeria = get_nearest_pizzeria(context.bot_data['valid_token'], context.bot_data['user_coord'])
     if query.data == 'self_delivery':
         context.bot.send_message(chat_id=query.message.chat_id,
                                  text=f"Будем ждать вас по адресу: {pizzeria['address']}")
     if query.data == 'delivery':
+
         delivery_man = pizzeria['deliveryman_id']
         customer_cart = get_cart_items(query.message.chat_id,context.bot_data['valid_token'])
         description_cart = [
@@ -244,6 +255,8 @@ def handle_delivery_method(context,update):
         latitude_client,longitude_client = context.bot_data['user_coord']
         context.bot.send_message(text="".join(description_cart), chat_id=delivery_man)
         context.bot.send_location(chat_id=delivery_man, latitude=latitude_client, longitude=longitude_client)
+    #job_queue.run_once(callback_increasing, 3,context=query.message.chat_id)
+    #context.job_queue.run_once(callback_increasing, 3, context=query.message.chat_id)
     return 'START'
 
 
@@ -279,10 +292,19 @@ def handle_users_reply(update, context):
             context.bot_data['valid_token'] = authorization_data['authorization']
             context.bot_data['lifetime_token'] = authorization_data['expires']
         next_state = state_handler(context, update)
-        print(next_state, type(next_state))
         db.set(chat_id, next_state)
     except Exception as err:
         print(err, 'error')
+
+
+""" тестовая ф-ия для проверки работы очереди"""
+def callback_alarm(bot, job):
+    bot.send_message(chat_id=job.context, text='BEEP')
+
+
+def callback_timer(bot, update, job_queue):
+    bot.send_message(chat_id=update.message.chat_id, text='Setting a timer for 1 minute!')
+    job_queue.run_once(callback_alarm, 2, context=update.message.chat_id)
 
 
 if __name__ == '__main__':
@@ -302,14 +324,19 @@ if __name__ == '__main__':
     authorization_data = get_token(client_id, client_secret)
     db.set('client_id',client_id)
     db.set('client_secret', client_secret)
-    updater = Updater(token)
+    updater = Updater(token,use_context=True)  #без context работает очередь, но не работает все остальное и наоборот
+    #job_queue = updater.job_queue
     dispatcher = updater.dispatcher
     dispatcher.bot_data['db'] = db
     dispatcher.bot_data['valid_token'] = authorization_data['authorization']
     dispatcher.bot_data['lifetime_token'] = authorization_data['expires']
     dispatcher.add_handler(CallbackQueryHandler(handle_users_reply))
+    dispatcher.add_handler(CommandHandler('timer', callback_timer, pass_job_queue=True))
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
-    dispatcher.add_handler(MessageHandler(Filters.text, lambda update, context, *args:get_distance(update,context,api_yandex)))
+    dispatcher.add_handler(MessageHandler(Filters.text,
+                                          lambda update, context, *args:get_distance(update,
+                                                                                     context,api_yandex),
+                                          ))
     dispatcher.add_handler(MessageHandler(Filters.location, location))
 
     updater.start_polling()
