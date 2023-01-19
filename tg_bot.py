@@ -5,9 +5,9 @@ from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters,
 import redis
 from api_moltin import (get_all_pizza, get_product, get_image, get_token, add_product_cart,
                         get_cart, get_cart_items, get_all_entries, delete_cart_item)
+from additional_data import get_nearest_pizzeria, fetch_coordinates
 from time import time
 import requests
-from geopy.distance import distance
 from textwrap import dedent
 from telegram import (LabeledPrice)
 
@@ -135,7 +135,7 @@ def handle_cart(context, update):
         return 'HANDLE_CART'
 
 
-def location(update, context):
+def get_location(update, context):
     message = None
     if update.edited_message:
         message = update.edited_message
@@ -143,35 +143,6 @@ def location(update, context):
         message = update.message
     current_pos = (message.location.latitude, message.location.longitude)
     update.message.reply_text(current_pos)
-
-
-def fetch_coordinates(apikey, address):
-    base_url = "https://geocode-maps.yandex.ru/1.x"
-    response = requests.get(base_url, params={
-        "geocode": address,
-        "apikey": apikey,
-        "format": "json",
-    })
-    response.raise_for_status()
-    found_places = response.json()['response']['GeoObjectCollection']['featureMember']
-    if not found_places:
-        raise IndexError('Такого адреса не существует')
-    most_relevant = found_places[0]
-    lat, lon = most_relevant['GeoObject']['Point']['pos'].split(" ")
-    return lon, lat
-
-
-def get_pizzeria_distance(pizzeria):
-    return pizzeria['distance']
-
-
-def get_nearest_pizzeria(token, user_coord):
-    all_pizzeria = get_all_entries(token)
-    for pizzeria in all_pizzeria['data']:
-        distance_to_client = distance(user_coord, (pizzeria['latitude'], pizzeria['longitude'])).km
-        pizzeria['distance'] = distance_to_client
-    min_distance = min(all_pizzeria['data'], key=get_pizzeria_distance)
-    return min_distance
 
 
 def get_distance(update, context, api_yandex):
@@ -215,7 +186,7 @@ def send_remind(context):
                                   '*сообщение что делать если пицца не пришла*')
 
 
-def product_payment(update, context, product_price):
+def pay_product(update, context, product_price):
     chat_id = update.effective_chat.id
     title = "Оплата заказа"
     description = "Оплата заказа #000000"
@@ -255,7 +226,7 @@ def handle_delivery_method(context, update):
         context.bot.send_message(text="".join(description_cart), chat_id=delivery_man)
         context.bot.send_location(chat_id=delivery_man, latitude=latitude_client, longitude=longitude_client)
 
-    product_payment(update, context, cart_price)
+    pay_product(update, context, cart_price)
     context.job_queue.run_once(send_remind, 3600, context=query.message.chat_id)
     return 'START'
 
@@ -345,5 +316,5 @@ if __name__ == '__main__':
     dispatcher.add_handler(CommandHandler('start', handle_users_reply))
     dispatcher.add_handler(MessageHandler(Filters.text,
                                           lambda update, context, *args: get_distance(update, context, api_yandex),))
-    dispatcher.add_handler(MessageHandler(Filters.location, location))
+    dispatcher.add_handler(MessageHandler(Filters.location, get_location))
     updater.start_polling()

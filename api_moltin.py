@@ -105,7 +105,7 @@ def create_flow(token):
     response.raise_for_status()
 
 
-def create_field(token, id_flow):
+def create_field(token, flow_id):
     headers = {
         'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
@@ -126,7 +126,7 @@ def create_field(token, id_flow):
                 'flow': {
                     'data': {
                         'type': 'flow',
-                        'id': id_flow,
+                        'id': flow_id,
                     },
                 },
             },
@@ -209,6 +209,7 @@ def add_product_cart(cart_id, product_id, token):
     }
     add_cart_response = requests.post(f'https://api.moltin.com/v2/carts/{cart_id}/items', headers=headers,
                                       json=product_data)
+    add_cart_response.raise_for_status()
 
 
 def get_cart(cart_id, token):
@@ -240,15 +241,15 @@ def get_all_entries(token):
     return response.json()
 
 
-def update_entries(token):
+def update_entries(token, chat_id):
     headers = {'Authorization': token}
-    list_id = get_all_entries(token)
-    for id in list_id:
+    ids = get_all_entries(token)
+    for id in ids:
         data = {
             "data":
                 {"id": id,
                  "type": "entry",
-                 "deliveryman_id": 305151573,
+                 "deliveryman_id": chat_id,
                  }
         }
 
